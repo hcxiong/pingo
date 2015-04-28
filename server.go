@@ -1,10 +1,11 @@
 package pingo
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"net"
-	"net/http"
 	"net/rpc"
 	"os"
 	"path"
@@ -61,15 +62,17 @@ func makeConfig() *config {
 }
 
 type rpcServer struct {
-	server  *rpc.Server
+	*rpc.Server
+	secret  string
 	objs    []string
 	conf    *config
 	running bool
 }
 
-func newRpcServer() *rpcServer {
+func newRpcServer(secret string) *rpcServer {
 	r := &rpcServer{
-		server: rpc.DefaultServer,
+		Server: rpc.NewServer(),
+		secret: secret,
 		objs:   make([]string, 0),
 		conf:   makeConfig(), // conf remains fixed after this point
 	}
@@ -77,12 +80,43 @@ func newRpcServer() *rpcServer {
 	return r
 }
 
-var defaultServer = newRpcServer()
+var defaultServer = newRpcServer(randstr(64))
+
+func (r *rpcServer) serveConn(conn io.ReadWriteCloser) {
+	var authenticated bool
+
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			break
+		}
+
+		parts := strings.SplitN(line, ": ", 2)
+		if parts[0] == "" || parts[1] == "" {
+			break
+		}
+
+		switch parts[0] {
+		case "Auth-Secret":
+			if parts[1] == r.secret {
+				authenticated = true
+			}
+		}
+	}
+
+	if authenticated {
+		// TODO:XXX: Sometimes it hangs here
+		r.Server.ServeConn(conn)
+	} else {
+		conn.Close()
+	}
+}
 
 func (r *rpcServer) register(obj interface{}) {
 	element := reflect.TypeOf(obj).Elem()
 	r.objs = append(r.objs, element.Name())
-	r.server.Register(obj)
+	r.Server.Register(obj)
 }
 
 type connection interface {
@@ -140,7 +174,6 @@ func (r *rpcServer) run() error {
 
 	for i := 0; i < conn.retries(); i++ {
 		r.conf.addr = conn.addr()
-		r.server.HandleHTTP(rpc.DefaultRPCPath, rpc.DefaultDebugPath)
 		listener, err = net.Listen(r.conf.proto, r.conf.addr)
 		if err == nil {
 			break
@@ -152,10 +185,15 @@ func (r *rpcServer) run() error {
 		return err
 	}
 
+	h.output("auth-token", defaultServer.secret)
 	h.output("ready", fmt.Sprintf("proto=%s addr=%s", r.conf.proto, r.conf.addr))
-	if err := http.Serve(listener, nil); err != nil {
-		h.output("fatal", fmt.Sprintf("err-http-serve: %s", err.Error()))
-		return err
+	for {
+		var conn net.Conn
+		conn, err = listener.Accept()
+		if err != nil {
+			h.output("fatal", fmt.Sprintf("err-http-serve: %s", err.Error()))
+			continue
+		}
+		go r.serveConn(conn)
 	}
-	return nil
 }

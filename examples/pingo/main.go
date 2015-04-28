@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/dullgiulio/pingo"
-	"log"
 )
+
+// Notice: do not use "log", it doesn't write when Stdout is not a terminal
 
 func runPlugin(proto, path string) {
 	p := pingo.NewPlugin(proto, path)
@@ -13,7 +14,7 @@ func runPlugin(proto, path string) {
 
 	objs, err := p.Objects()
 	if err != nil {
-		log.Print(err)
+		fmt.Println(err)
 		return
 	}
 
@@ -22,7 +23,12 @@ func runPlugin(proto, path string) {
 	var resp string
 
 	if err := p.Call("Plugin.SayHello", "from your plugin", &resp); err != nil {
-		log.Print(err)
+		fmt.Println(err)
+	} else {
+		fmt.Printf("%s\n", resp)
+	}
+	if err := p.Call("Plugin.SayHello", "from your plugin, second call", &resp); err != nil {
+		fmt.Println(err)
 	} else {
 		fmt.Printf("%s\n", resp)
 	}
@@ -31,7 +37,7 @@ func runPlugin(proto, path string) {
 func main() {
 	protocols := []string{"unix", "tcp"}
 	for _, p := range protocols {
-		fmt.Println("Running hello world plugin")
+		fmt.Printf("Running hello world plugin via %s\n", p)
 
 		runPlugin(p, "bin/plugins/pingo-hello-world")
 
