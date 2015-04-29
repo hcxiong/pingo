@@ -150,6 +150,8 @@ func (p *Plugin) Call(name string, args interface{}, resp interface{}) error {
 		return conn.err
 	}
 
+	defer conn.client.Close()
+
 	return conn.client.Call(name, args, resp)
 }
 
@@ -313,29 +315,13 @@ func (c *ctrl) open() {
 }
 
 func (c *ctrl) ready(val string) bool {
-	var err error
-
 	if err := c.parseReady(val); err != nil {
 		c.fatal(err)
 		return false
 	}
 
-	c.client, err = dialAuthRpc(c.secret, c.proto, c.addr, c.p.initTimeout)
-	if err != nil {
-		c.fatal(err)
-		return false
-	}
-
-	// Remove the temp socket now that we are connected
-	if c.proto == "unix" {
-		if err := os.Remove(c.addr); err != nil {
-			c.p.handler.Error(errors.New("Cannot remove temporary socket: " + err.Error()))
-		}
-	}
-
 	// Defuse the timeout on ready
 	c.timeoutCh = nil
-
 	return true
 }
 
@@ -457,7 +443,13 @@ func (p *Plugin) run() {
 				continue
 			}
 
-			r.client = c.client
+			var err error
+
+			r.client, err = dialAuthRpc(c.secret, c.proto, c.addr, c.p.initTimeout)
+			if err != nil {
+				r.err = err
+			}
+
 			r.wr.done()
 		case o := <-c.objsCh:
 			if c.isFatal() {
@@ -518,10 +510,6 @@ func (p *Plugin) run() {
 				c.client.Call(internalObject+".Exit", 0, nil)
 			}
 
-			if c.client != nil {
-				c.client.Close()
-			}
-
 			// Do not accept calls
 			c.close()
 
@@ -538,6 +526,13 @@ func (p *Plugin) run() {
 			// Signal to whoever killed us (via killCh) that we are done
 			if c.over != nil {
 				c.over.done()
+			}
+
+			// Remove the temp socket now that we are connected
+			if c.proto == "unix" {
+				if err := os.Remove(c.addr); err != nil {
+					c.p.handler.Error(errors.New("Cannot remove temporary socket: " + err.Error()))
+				}
 			}
 
 			c.proc = nil
