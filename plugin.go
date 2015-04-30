@@ -235,7 +235,7 @@ func newClient(s string, conn io.ReadWriteCloser) *client {
 }
 
 func (c *client) authenticate(w io.Writer) error {
-	_, err := io.WriteString(w, "Auth-Secret: "+c.secret+"\n\n")
+	_, err := io.WriteString(w, c.secret)
 	return err
 }
 

@@ -1,7 +1,6 @@
 package pingo
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -82,35 +81,21 @@ func newRpcServer(secret string) *rpcServer {
 
 var defaultServer = newRpcServer(randstr(64))
 
+func (r *rpcServer) authConn(conn io.Reader) bool {
+	buf := make([]byte, 64)
+	io.ReadFull(conn, buf)
+
+	if string(buf) == r.secret {
+		return true
+	}
+	return false
+}
+
 func (r *rpcServer) serveConn(conn io.ReadWriteCloser) {
-	var authenticated bool
-
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			break
-		}
-
-		parts := strings.SplitN(line, ": ", 2)
-		if parts[0] == "" || parts[1] == "" {
-			break
-		}
-
-		switch parts[0] {
-		case "Auth-Secret":
-			if parts[1] == r.secret {
-				authenticated = true
-			}
-		}
-	}
-
-	if authenticated {
-		// TODO:XXX: Sometimes it hangs here
+	if r.authConn(conn) {
 		r.Server.ServeConn(conn)
-	} else {
-		conn.Close()
 	}
+	conn.Close()
 }
 
 func (r *rpcServer) register(obj interface{}) {
